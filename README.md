@@ -19,12 +19,14 @@
 - eventually: 
     - periodic updates (how about every time a file is transferred?)
     - missing packets and retransmissions
-    - other error handling: 
-        - does not work with large files (more than one chunk)
     - file integrity check
     - documentation: write what's going down in the README
 
+## System Requirements / Limitations
+- assumes that every peer has at least one file
+- could redo with struct instead of json if i want to send multiple chunks of a file, i guess
 
+- so now i am using json for the connection to the tracker server and struct for peer to peer communication
 
 ## Questions
 - what if a peer wants to leave the network?

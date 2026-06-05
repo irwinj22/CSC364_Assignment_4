@@ -1,10 +1,12 @@
 import sys
 import json
+import struct
 import socket
 import random
 import threading
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
+
 
 # list of local files (either from startup or transferred from other peers)
 local_files = []
@@ -39,13 +41,10 @@ def start_server(host, port, this_peer_id):
             # send all offers immediately on new connection
             for file in local_files:
                 print(f"[SEND OFFER] --> {addr} | file: {file}")
-                payload = {
-                    "message_type": "O",
-                    "peer_id": this_peer_id,
-                    "filename": file
-                }
-                conn.sendall(json.dumps(payload).encode('utf-8'))
-
+                filename_bytes = file.encode('utf-8')
+                payload = struct.pack(f'!cI{len(filename_bytes)}s', b'O', this_peer_id, filename_bytes)
+                send_message(conn, payload)
+        
             handler_thread = threading.Thread(target = handle_messages, args = (conn, addr, this_peer_id), daemon=True)
             handler_thread.start()
         except: 
@@ -61,16 +60,17 @@ def handle_messages(conn, addr, this_peer_id):
 
     while True:
         try:
-            data = conn.recv(1024)
+            data = recv_message(conn)
             if not data: 
                 break
-            decoded_data = json.loads(data.decode('utf-8'))
-            message_type = decoded_data.get("message_type")
+            # decoded_data = json.loads(data.decode('utf-8'))
+            # message_type = decoded_data.get("message_type")
+            message_type = struct.unpack('!c', data[0:1])[0].decode('utf-8')
 
             # offer 
             if message_type == "O":
-                peer_id = decoded_data.get("peer_id")
-                filename = decoded_data.get("filename")
+                peer_id = struct.unpack('!I', data[1:5])[0]
+                filename = data[5:].decode('utf-8') 
                 print(f"[RECV OFFER] <-- peer {peer_id} | file: {filename}")
                 
                 # store offer information
@@ -83,7 +83,7 @@ def handle_messages(conn, addr, this_peer_id):
 
             # request
             elif message_type == "R":
-                filename = decoded_data.get("filename")
+                filename = data[1:].decode('utf-8')
                 print(f"[RECV REQUEST] -> file: {filename}")
 
                 # transfer the file's data
@@ -91,7 +91,7 @@ def handle_messages(conn, addr, this_peer_id):
 
             # transfer
             elif message_type == "T":
-                chunk = bytes(decoded_data.get("data"))
+                chunk = data[1:]
     
                 # should open the file and write data
                 if current_transfer_file is not None:
@@ -99,17 +99,13 @@ def handle_messages(conn, addr, this_peer_id):
                         f.write(chunk)
 
                 # then send an ack
-                ack_payload = {
-                    "message_type" : "A",
-                    "peer_id": this_peer_id
-                }
-                
+                ack_payload = struct.pack('!cI', b'A', peer_id)
                 print(f"[RECV TRANSFER] | filename: {current_transfer_file}")
-                conn.sendall(json.dumps(ack_payload).encode('utf-8'))
+                send_message(conn, ack_payload)
 
             # ack
             elif message_type == "A":
-                peer_id = decoded_data.get("peer_id")
+                peer_id = struct.unpack('!I', data[1:5])[0]
                 print(f"Recieved ACK from peer {peer_id}")
 
                 # TODO: if it doesn't receive ack within period, there should be some retransmission or something
@@ -140,7 +136,7 @@ def connect_tracker(server_host, server_port, client_host, client_port, this_pee
         s.sendall(json_bytes)
 
         # read the reply, which will contain all of the peers on the network
-        response = s.recv(1024)
+        response = s.recv(1025)
         response_peers = json.loads(response.decode('utf-8'))
 
         # print and store
@@ -212,12 +208,9 @@ def get_socket(peer_id):
 def make_file_request(peer_id, filename):
     s = get_socket(peer_id)
 
-    # send the information
-    payload = {
-        "message_type": "R",
-        "filename": filename
-    }
-    s.sendall(json.dumps(payload).encode('utf-8'))
+    filename_bytes = filename.encode('utf-8')
+    payload = struct.pack(f'!c{len(filename_bytes)}s', b'R', filename_bytes)
+    send_message(s, payload)
     print(f"[SEND REQUEST] -> peer {peer_id} | file: {filename}")
 
 # transfer file data to peer.
@@ -228,19 +221,15 @@ def transfer_file(conn, filename):
     with open(filename, "rb") as f:
         while True:
             # read chunk
-            chunk = f.read(1024)
+            chunk = f.read(1025)
             if not chunk:
                 break  # File transmission complete
 
             # create payload
-            payload = {
-                "message_type": "T",
-                "data": list(chunk), 
-            }
-
+            payload = struct.pack(f'!c{len(chunk)}s', b'T', chunk)
             # send to connection
             print(f"[SEND TRANSFER] file: {filename}")
-            conn.sendall(json.dumps(payload).encode('utf-8'))
+            send_message(conn, payload)
 
 # parse user input and handle accordingly
 def parse_user_message(message):
@@ -289,12 +278,22 @@ def send_offer(host, port, peer_id, filename):
     print(f"[SEND OFFER] --> {host}:{port} | file: {filename}")
     s = connections[(host, port)]
 
-    payload = {
-            "message_type": "O",
-            "peer_id" : peer_id,
-            "filename": filename
-    }
-    s.sendall(json.dumps(payload).encode('utf-8'))
+    filename_bytes = filename.encode('utf-8')
+    payload = struct.pack(f'!cI{len(filename_bytes)}s', b'O', peer_id, filename_bytes)
+
+    send_message(s, payload)
+
+def send_message(conn, payload):
+    length = len(payload)
+    conn.sendall(struct.pack('!I', length))
+    conn.sendall(payload)
+
+def recv_message(conn):
+    raw_length = conn.recv(4)
+    if not raw_length:
+        return None
+    length = struct.unpack('!I', raw_length)[0]
+    return conn.recv(length)
 
 # log other peers and the files that they have
 def log_peer_files():
@@ -352,10 +351,9 @@ def main():
 
     # connect to the tracker server
     connect_tracker(server_host, server_port, peer_host, peer_port, this_peer_id)
-    
-    session = PromptSession()
 
     # poll the user
+    session = PromptSession()
     with patch_stdout():
         while True:
                 # create prompt session
