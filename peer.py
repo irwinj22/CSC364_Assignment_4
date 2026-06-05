@@ -8,7 +8,7 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 # list of local files (either from startup or transferred from other peers)
 local_files = []
-# dicationary of all peers. key is peer_id and value is (host, port)
+# dicationary of all peers. key is peer_id and value is dict: {'host' : host, 'port' : port}
 peer_id_addrs = {}
 # all connections. key is (host, port) and value is socket
 connections = {}
@@ -79,13 +79,20 @@ def handle_messages(conn, addr):
             # request
             elif message_type == "R":
                 filename = decoded_data.get("filename")
-                print(f"Recevied REQUEST for file: {filename}")
-                # TODO ..
+                print(f"[RECV REQUEST] -> peer {peer_id} | file: {filename}")
+
+                transfer_file(conn, filename)
+
+                # TODO .. do I just repond with the data to that? I am not quite sure really ..
 
             # transfer
             elif message_type == "T":
                 data = decoded_data.get("data")
-                # TODO ...
+                print(f"[RECV TRANSFER]")
+
+                # should open the file and write data
+
+                # then, should broadcast to everyone that it has the file
 
             # ack
             elif message_type == "A":
@@ -168,6 +175,58 @@ def connect_to_peer(host, port, this_peer_id):
         handler_thread = threading.Thread(target=handle_messages, args=(s, (host, port)), daemon=True)
         handler_thread.start()
 
+# get socket from peer_id and filename
+def get_socket(peer_id):
+    # get host and port information
+    if peer_id not in peer_id_addrs:
+        print(f"Unknown peer {peer_id}")
+        return 
+    
+    host = peer_id_addrs[peer_id].get('host')
+    port = peer_id_addrs[peer_id].get('port')
+
+    # get socket
+    if (host, port) not in connections:
+        print(f"No connection to peer {peer_id}")
+        return
+    
+    return connections[(host, port)]
+
+
+# make request to peer. i guess we are going to assume that the connection is open already?
+def make_file_request(peer_id, filename):
+    s = get_socket(peer_id)
+
+    # send the information
+    payload = {
+        "message_type": "R",
+        "filename": filename
+    }
+    s.sendall(json.dumps(payload).encode('utf-8'))
+    print(f"[SEND REQUEST] -> peer {peer_id} | file: {filename}")
+
+# transfer file data to peer.
+# open the file break into chunks, and send. 
+# complete transfer with acknowledgement message
+def transfer_file(conn, filename):
+    # open the file
+    with open(filename, "rb") as f:
+        while True:
+            # read chunk
+            chunk = f.read(1024)
+            if not chunk:
+                break  # File transmission complete
+
+            # create payload
+            payload = {
+                "message_type": "T",
+                "data": list(chunk), 
+            }
+
+            # send to connection
+            print(f"[SEND TRANSFER] file: {filename}")
+            conn.sendall(json.dumps(payload).encode('utf-8'))
+
 # parse user input and handle accordingly
 def parse_user_message(message):
     arguments = message.split()
@@ -177,16 +236,30 @@ def parse_user_message(message):
         if len(arguments) != 3:
             print(f"Error. Incorrect usage of -r. Expect 3 arguments and receieved {len(arguments)}")
             return
+        
+        try: 
+            peer = int(arguments[1])
+        except ValueError: 
+            print("Error. Cannot convert argument to string. Did you enter everything in correct order?")
+            return
+        
+        filename = arguments[2]
 
-        print("I would make a request here ... ")
-        # TODO: implement ...
-        # now, i can just look up the right information to make the connection and transfer the file and whatnot
+        # if peer exists and contains file, make request
+        # otherwise, error
+        if peer in peer_files and filename in peer_files[peer]:
+            make_file_request(peer, filename)
+        else: 
+            print(f"Error. File {filename} does not exist in {peer}.")
+            return
+        
     # print all other peers and their files
     elif arguments[0] == "-p":
         if len(arguments) != 1:
             print(f"Error. Incorrect usage of -p. Expect 1 argument and receieved {len(arguments)}")
             return
         log_peer_files()
+
     # anything else: error
     else: 
         print(f"Error. Did not recognize command: {arguments[0]}")
@@ -237,9 +310,14 @@ def parse_cl():
 
     # grab hosts and ports
     server_host = sys.argv[1]
-    server_port = int(sys.argv[2])
     peer_host = sys.argv[3]
-    peer_port = int(sys.argv[4])
+    try:
+        server_port = int(sys.argv[2])
+        peer_port = int(sys.argv[4])
+    except ValueError: 
+        print("Error. Cannot convert argument to string. Did you enter everything in correct order?")
+        sys.exit(1)
+
 
     # add local files
     for arg in sys.argv[5:]:

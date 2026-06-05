@@ -5,7 +5,7 @@
     - `python peer.py <server_host> <server_port> <peer_host> <peer_port> <list of local files>`
 
 ## User Interface
-- to request file from other peer: -r <filename> <user>
+- to request file from other peer: -r `<filename>` `<user>`
 - to print list of all peers and their files: -p
 - TODO: to terminate peer: -e
 
