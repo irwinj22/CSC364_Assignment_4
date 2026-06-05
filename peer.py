@@ -46,7 +46,7 @@ def start_server(host, port, this_peer_id):
                 }
                 conn.sendall(json.dumps(payload).encode('utf-8'))
 
-            handler_thread = threading.Thread(target = handle_messages, args = (conn, addr), daemon=True)
+            handler_thread = threading.Thread(target = handle_messages, args = (conn, addr, this_peer_id), daemon=True)
             handler_thread.start()
         except: 
             print("Exception")
@@ -55,7 +55,10 @@ def start_server(host, port, this_peer_id):
     s.close()
 
 # handle incoming messages from peers
-def handle_messages(conn, addr):
+def handle_messages(conn, addr, this_peer_id):
+    # if receive transfer
+    current_transfer_file = None
+
     while True:
         try:
             data = conn.recv(1024)
@@ -76,28 +79,40 @@ def handle_messages(conn, addr):
                 else: 
                     peer_files[peer_id].append(filename)
 
+                current_transfer_file = filename
+
             # request
             elif message_type == "R":
                 filename = decoded_data.get("filename")
-                print(f"[RECV REQUEST] -> peer {peer_id} | file: {filename}")
+                print(f"[RECV REQUEST] -> file: {filename}")
 
+                # transfer the file's data
                 transfer_file(conn, filename)
-
-                # TODO .. do I just repond with the data to that? I am not quite sure really ..
 
             # transfer
             elif message_type == "T":
-                data = decoded_data.get("data")
-                print(f"[RECV TRANSFER]")
-
+                chunk = bytes(decoded_data.get("data"))
+    
                 # should open the file and write data
+                if current_transfer_file is not None:
+                    with open(current_transfer_file, "ab") as f:
+                        f.write(chunk)
 
-                # then, should broadcast to everyone that it has the file
+                # then send an ack
+                ack_payload = {
+                    "message_type" : "A",
+                    "peer_id": this_peer_id
+                }
+                
+                print(f"[RECV TRANSFER] | filename: {current_transfer_file}")
+                conn.sendall(json.dumps(ack_payload).encode('utf-8'))
 
             # ack
             elif message_type == "A":
                 peer_id = decoded_data.get("peer_id")
                 print(f"Recieved ACK from peer {peer_id}")
+
+                # TODO: if it doesn't receive ack within period, there should be some retransmission or something
 
             # unknown type: error
             else:
@@ -172,7 +187,7 @@ def connect_to_peer(host, port, this_peer_id):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((host, port))
         connections[(host, port)] = s
-        handler_thread = threading.Thread(target=handle_messages, args=(s, (host, port)), daemon=True)
+        handler_thread = threading.Thread(target=handle_messages, args=(s, (host, port), this_peer_id), daemon=True)
         handler_thread.start()
 
 # get socket from peer_id and filename

@@ -12,10 +12,18 @@
 ## Progress
 - currently:
     - tracker server setup, peers join and make themselves known to each other
-    - user polling works, have to implement the file transfer stuff though
+    - user polling works, have to write data when a file is transferred
+    - then, send the ack back
     - this involves both sending and receiving request, transfer, and ack things ...
 - at that point, it's making sure that the network stays updated when files are exchanged
-- and then handling errors and stuff like that
+- eventually: 
+    - periodic updates (how about every time a file is transferred?)
+    - missing packets and retransmissions
+    - other error handling: 
+        - does not work with large files (more than one chunk)
+    - file integrity check
+    - documentation: write what's going down in the README
+
 
 
 ## Questions
