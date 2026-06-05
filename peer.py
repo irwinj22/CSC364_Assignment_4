@@ -79,6 +79,11 @@ def handle_messages(conn, addr, this_peer_id):
                 else: 
                     peer_files[peer_id].append(filename)
 
+                # store connection keyed by peer's listening address
+                addr_info = peer_id_addrs.get(peer_id)
+                if addr_info and (addr_info['host'], addr_info['port']) not in connections:
+                    connections[(addr_info['host'], addr_info['port'])] = conn
+
                 current_transfer_file = filename
 
             # request
@@ -173,8 +178,8 @@ def handle_tracker_messages(conn, this_peer_id):
             port = decoded_data.get("port")
             peer_id = decoded_data.get("peer_id")
             peer_id_addrs[int(peer_id)] = {"host" : host, "port" : port}
-            connect_to_peer(host, port, this_peer_id)
-            send_all_offers(host, port, this_peer_id)
+            # connect_to_peer(host, port, this_peer_id)
+            # send_all_offers(host, port, this_peer_id)
 
 # connect directly to peer
 # create socket, connect, store, and then start handler thread
@@ -351,6 +356,11 @@ def main():
 
     # connect to the tracker server
     connect_tracker(server_host, server_port, peer_host, peer_port, this_peer_id)
+
+    # connect to everyone
+    for peer_id, addr in peer_id_addrs.items():
+        connect_to_peer(addr['host'], addr['port'], this_peer_id)
+        send_all_offers(addr['host'], addr['port'], this_peer_id)
 
     # poll the user
     session = PromptSession()

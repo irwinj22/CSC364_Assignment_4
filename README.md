@@ -15,11 +15,15 @@
     - user polling works, have to write data when a file is transferred
     - then, send the ack back
     - this involves both sending and receiving request, transfer, and ack things ...
-- at that point, it's making sure that the network stays updated when files are exchanged
-- eventually: 
+
+- why can't the second peer send something to the first peer?
+
+- possible fixes
     - periodic updates (how about every time a file is transferred?)
     - missing packets and retransmissions
     - file integrity check
+
+- could easily do:
     - documentation: write what's going down in the README
 
 ## System Requirements / Limitations
@@ -33,3 +37,5 @@
 - eventually, peers should get an updated list of each other's files. how can i handle this? 
     - potential solution: send a broadcast as soon as you get something? 
 - eventually: how to handle timeouts? 
+- there is a connection from 1 to 2, but not from 2 to 1.
+- why are all these errors occuring? i cannot figure how to get this assigmnent to work.
