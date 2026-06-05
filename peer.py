@@ -1,13 +1,12 @@
 import sys
 import json
-import time
 import socket
 import random
 import threading
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 
-# list of local files (either from startup or grabbed from other peers)
+# list of local files (either from startup or transferred from other peers)
 local_files = []
 # dicationary of all peers. key is peer_id and value is (host, port)
 peer_id_addrs = {}
@@ -47,7 +46,7 @@ def start_server(host, port, this_peer_id):
                 }
                 conn.sendall(json.dumps(payload).encode('utf-8'))
 
-            handler_thread = threading.Thread(target = handle_messages, args = (conn, addr, this_peer_id), daemon=True)
+            handler_thread = threading.Thread(target = handle_messages, args = (conn, addr), daemon=True)
             handler_thread.start()
         except: 
             print("Exception")
@@ -56,7 +55,7 @@ def start_server(host, port, this_peer_id):
     s.close()
 
 # handle incoming messages from peers
-def handle_messages(conn, addr, this_peer_id):
+def handle_messages(conn, addr):
     while True:
         try:
             data = conn.recv(1024)
@@ -65,28 +64,29 @@ def handle_messages(conn, addr, this_peer_id):
             decoded_data = json.loads(data.decode('utf-8'))
             message_type = decoded_data.get("message_type")
 
-            # handle different message types
             # offer 
             if message_type == "O":
                 peer_id = decoded_data.get("peer_id")
                 filename = decoded_data.get("filename")
                 print(f"[RECV OFFER] <-- peer {peer_id} | file: {filename}")
                 
-                # add to internal log
-                # TODO: does this make sense? 
-                # what if there are multiple files? that means that I am going to get
+                # store offer information
                 if peer_id not in peer_files:
                     peer_files[peer_id] = [filename]
                 else: 
                     peer_files[peer_id].append(filename)
+
             # request
             elif message_type == "R":
                 filename = decoded_data.get("filename")
                 print(f"Recevied REQUEST for file: {filename}")
                 # TODO ..
+
+            # transfer
             elif message_type == "T":
                 data = decoded_data.get("data")
                 # TODO ...
+
             # ack
             elif message_type == "A":
                 peer_id = decoded_data.get("peer_id")
@@ -102,7 +102,7 @@ def handle_messages(conn, addr, this_peer_id):
 
     conn.close()
 
-# connects to tracker server and finds all known peers
+# connect to tracker server and find all known peers
 def connect_tracker(server_host, server_port, client_host, client_port, this_peer_id):
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -121,6 +121,7 @@ def connect_tracker(server_host, server_port, client_host, client_port, this_pee
         response = s.recv(1024)
         response_peers = json.loads(response.decode('utf-8'))
 
+        # print and store
         print("---")
         print("Peers in network:")
         if len(response_peers) == 0:
@@ -129,12 +130,102 @@ def connect_tracker(server_host, server_port, client_host, client_port, this_pee
             for other_peer_id, peer_info in response_peers.items():
                 host = peer_info["host"]
                 port = peer_info["port"]
-                peer_id_addrs[other_peer_id] = (host, port)
+                peer_id_addrs[int(other_peer_id)] = {"host" : host, "port" : port}
                 print(f"Peer {other_peer_id}: {host}, {port}")
         print("---")
 
     except socket.timeout:
         print("The connection attempt timed out.")
+
+    tracker_thread = threading.Thread(target=handle_tracker_messages, args=(s, this_peer_id), daemon=True)
+    tracker_thread.start()
+
+# listen on the tracker socket for new_peer broadcasts 
+# when new peer arrives, store, connect, and tell them about all of this peer's local files
+def handle_tracker_messages(conn, this_peer_id):
+    while True:
+        data = conn.recv(1024)
+        if not data:
+            break
+        decoded_data = json.loads(data.decode('utf-8'))
+        # update something
+        # TODO: create better comment, understand what's going on
+        if decoded_data.get("message_type") == "new_peer":
+            host = decoded_data.get("host")
+            port = decoded_data.get("port")
+            peer_id = decoded_data.get("peer_id")
+            peer_id_addrs[int(peer_id)] = {"host" : host, "port" : port}
+            connect_to_peer(host, port, this_peer_id)
+            send_all_offers(host, port, this_peer_id)
+
+# connect directly to peer
+# create socket, connect, store, and then start handler thread
+def connect_to_peer(host, port, this_peer_id):
+    if (host, port) not in connections:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((host, port))
+        connections[(host, port)] = s
+        handler_thread = threading.Thread(target=handle_messages, args=(s, (host, port)), daemon=True)
+        handler_thread.start()
+
+# parse user input and handle accordingly
+def parse_user_message(message):
+    arguments = message.split()
+
+    # request file from user
+    if arguments[0] == "-r":
+        if len(arguments) != 3:
+            print(f"Error. Incorrect usage of -r. Expect 3 arguments and receieved {len(arguments)}")
+            return
+
+        print("I would make a request here ... ")
+        # TODO: implement ...
+        # now, i can just look up the right information to make the connection and transfer the file and whatnot
+    # print all other peers and their files
+    elif arguments[0] == "-p":
+        if len(arguments) != 1:
+            print(f"Error. Incorrect usage of -p. Expect 1 argument and receieved {len(arguments)}")
+            return
+        log_peer_files()
+    # anything else: error
+    else: 
+        print(f"Error. Did not recognize command: {arguments[0]}")
+
+# send offer for all files to peer
+def send_all_offers(host, port, peer_id):
+    for file in local_files:
+        send_offer(host, port, peer_id, file)
+
+# send single file offer to peer
+def send_offer(host, port, peer_id, filename):
+    print(f"[SEND OFFER] --> {host}:{port} | file: {filename}")
+    s = connections[(host, port)]
+
+    payload = {
+            "message_type": "O",
+            "peer_id" : peer_id,
+            "filename": filename
+    }
+    s.sendall(json.dumps(payload).encode('utf-8'))
+
+# log other peers and the files that they have
+def log_peer_files():
+    print("-------")
+    print("All peers and files:")
+    for peer_id, files in peer_files.items():
+        addr = peer_id_addrs.get(peer_id)
+        if addr is not None:
+            print(f"  peer {peer_id} | {addr['host']}:{addr['port']}")
+        # TODO: raise a better error here.
+        else:
+            print("COULD NOT FIND")
+            return
+        if not files:
+            print(f"    no files")
+        else:
+            for file in files:
+                print(f"    - {file}")
+    print("-------")
 
 # parse the command line
 # expects four arguments: tracker server host/port and this peer's host/port
@@ -156,16 +247,6 @@ def parse_cl():
 
     return (server_host, server_port, peer_host, peer_port)
 
-# connect directly to peer
-# create socket, connect, and then start handler thread
-def connect_to_peer(host, port, this_peer_id):
-    if (host, port) not in connections:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((host, port))
-        connections[(host, port)] = s
-        handler_thread = threading.Thread(target=handle_messages, args=(s, (host, port), this_peer_id), daemon=True)
-        handler_thread.start()
-
 def main():
     server_host, server_port, peer_host, peer_port = parse_cl()
 
@@ -179,14 +260,6 @@ def main():
     # connect to the tracker server
     connect_tracker(server_host, server_port, peer_host, peer_port, this_peer_id)
     
-    # first connect to all peers
-    for peer, addr in peer_id_addrs.items():
-        connect_to_peer(addr[0], addr[1], this_peer_id)
-
-    # then send offers if we have any files
-    for peer, addr in peer_id_addrs.items():
-        send_all_offers(addr[0], addr[1], this_peer_id)
-
     session = PromptSession()
 
     # poll the user
@@ -201,61 +274,6 @@ def main():
                     continue
 
                 parse_user_message(user_message)
-
-    # TODO: replace this with client interface, or something
-    server_thread.join()
-
-# parse user input
-# to request file from other peer: -r <filename> <user>
-# to print list of all peers and their files: -p
-def parse_user_message(message):
-    arguments = message.split()
-
-    # request file from user
-    if arguments[0] == "-r":
-        if len(arguments) != 3:
-            print(f"Error. Incorrect usage of -r. Expect 3 arguments and receieved {len(arguments)}")
-            return
-
-        print("I would make a request here ... ")
-        # TODO: implement ...
-    elif arguments[0] == "-p":
-        if len(arguments) != 1:
-            print(f"Error. Incorrect usage of -p. Expect 1 argument and receieved {len(arguments)}")
-            return
-        log_peer_files()
-    else: 
-        print(f"Error. Did not recognize command: {arguments[0]}")
-
-# send offer for all files to peer
-def send_all_offers(host, port, peer_id):
-    for file in local_files:
-        send_offer(host, port, peer_id, file)
-
-# send single file offer to peer
-def send_offer(host, port, peer_id, filename):
-    print(f"[SEND OFFER] --> {host}:{port} | file: {filename}")
-    s = connections[(host, port)]
-
-    payload = {
-            "message_type": "O",
-            "peer_id" : peer_id,
-            "filename": filename
-    }
-    s.sendall(json.dumps(payload).encode('utf-8'))
-
-def log_peer_files():
-    print("-------")
-    print("All peers and files:")
-    for peer_id, files in peer_files.items():
-        addr = peer_id_addrs.get(str(peer_id), ("unknown", "unknown"))
-        print(f"  peer {peer_id} | {addr[0]}:{addr[1]}")
-        if not files:
-            print(f"    no files")
-        else:
-            for file in files:
-                print(f"    - {file}")
-    print("-------")
 
 if __name__ == "__main__":
     main()
