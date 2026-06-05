@@ -1,15 +1,14 @@
-# this is the tracker server .. we are going to want to spin up a server
-# that keeps track of every peer in the network
-# this will be used to tell new peers what's up and whatnot
-
 import sys
+import json
 import socket
 
 # list of tuples (host, port)
-all_peers = []
+# dictionary. key is id, value is another dictionary that contains host and port
+all_peers = {}
 
 # parse command line.
 # expect exactly two arguments: host and port
+# returns the host and port
 def parse_cl():
     if len(sys.argv) != 3:
         print("Error. Expect exactly two arguments: host and port.")
@@ -22,9 +21,8 @@ def parse_cl():
     return (host, port)
 
 # start the server
-# 
 def start_server(host, port):
-    print("Start TRACKER server!")
+    print("Start Tracker server ...")
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -35,23 +33,44 @@ def start_server(host, port):
         print(f"[Server Error] Could not bind to port {port}: {e}")
         return
     
-    # for now, receive message then send cool beans back
+    # receive messages from new peers
     while True: 
         try:
-            #
+            # message from new peer containing host, port, and peer id
             conn, addr = s.accept()
-            print(f"Connected to client at {addr}")
-            message = conn.recv(1024).decode("utf-8")
-            print("Message: " + message)
-            conn.sendall("cool beans".encode("utf-8"))
+            data = conn.recv(1024)
+            decoded_data = json.loads(data.decode('utf-8'))
+            
+            # reply with all of the peers in the network
+            reply = json.dumps(all_peers)
+            json_bytes = reply.encode('utf-8')
+            conn.sendall(json_bytes)
+
+            # add the new peer (host and port) to list of peers
+            peer_host = decoded_data.get("host")
+            peer_port = decoded_data.get("port")
+            peer_id = decoded_data.get("peer_id")
+            all_peers[peer_id] = {"host" : peer_host,
+                                  "port" : peer_port
+                                  }
+            
+            print(f"Received connection from peer {peer_id}: {host}, {port}")
+
         except: 
             print("Exception")
             break
+        log_peers()
+
+def log_peers():
+    print("-------")
+    print("Logging Peers")
+    for peer_id, addr in all_peers.items():
+        print(f"Peer {peer_id}: {addr['host']}, {addr['port']}")
+    print("-------")
 
 def main():
     host, port = parse_cl()
     start_server(host, port)
-    print("hello")
 
 if __name__ == "__main__":
     main()
