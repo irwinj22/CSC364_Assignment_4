@@ -27,6 +27,7 @@ interface allows peers to see the files that other peers have and request/transm
 ## Left Unfinished
 
 These are the parts of the assignment that I have not finished:
+
     - periodic updates (how about every time a file is transferred?)
     - missing packets and retransmissions
     - file integrity check
