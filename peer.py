@@ -165,22 +165,20 @@ def connect_tracker(server_host, server_port, client_host, client_port, this_pee
 
 # listen on the tracker socket for new_peer broadcasts 
 # when new peer arrives, store, connect, and tell them about all of this peer's local files
-def handle_tracker_messages(conn, this_peer_id):
+def handle_tracker_messages(conn):
     while True:
         data = conn.recv(1024)
         if not data:
             break
         decoded_data = json.loads(data.decode('utf-8'))
-        # update something
-        # TODO: create better comment, understand what's going on
+        # update local data log
         if decoded_data.get("message_type") == "new_peer":
             host = decoded_data.get("host")
             port = decoded_data.get("port")
             peer_id = decoded_data.get("peer_id")
             peer_id_addrs[int(peer_id)] = {"host" : host, "port" : port}
-            # connect_to_peer(host, port, this_peer_id)
-            # send_all_offers(host, port, this_peer_id)
 
+        
 # connect directly to peer
 # create socket, connect, store, and then start handler thread
 def connect_to_peer(host, port, this_peer_id):
